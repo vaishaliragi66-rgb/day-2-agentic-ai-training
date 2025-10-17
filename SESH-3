@@ -1,0 +1,29 @@
+exercise for lab-1 :
+messages = [{"role": "user", "content": "Pick a business area that might be worth exploring for an agentic ai opportunity"}]
+
+# Then make the first call:
+
+response = openai.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=messages
+)
+
+suggestion = response.choices[0].message.content
+
+print(suggestion)
+
+# Then read the business idea:
+
+
+followup_messages = [
+    {"role": "user", "content": f"Give me a business idea in the area of {suggestion}"}
+]
+
+response = openai.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=followup_messages
+)
+
+business_idea = response.choices[0].message.content
+print(business_idea)
+
