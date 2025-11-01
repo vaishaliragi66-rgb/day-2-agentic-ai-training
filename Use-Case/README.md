@@ -131,7 +131,7 @@ project-root/
 
 ## 💫 Author
 
-**Vaishnavi Ragi**
+**Vaishali Ragi**
 💻 Engineering Student | ⚡ Automation Enthusiast | 🎨 Aesthetic Builder
 GitHub → [@vaishaliragi66-rgb](https://github.com/vaishaliragi66-rgb)
 
