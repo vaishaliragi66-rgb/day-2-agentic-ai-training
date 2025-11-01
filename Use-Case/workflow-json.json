@@ -1,0 +1,796 @@
+{
+  "name": "Task4U - now better",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a task parser. Convert the following natural-language command into a structured JSON array of tasks.\n\nRules:\n1. Return only valid JSON — no explanations, no code fences.\n2. Wrap all task objects in a single array.\n3. Each task object must contain:\n   - \"delivery_method\" (string): \"gmail\" if sending any files or explicitly mentioned ; otherwise \"telegram (telegram only for messages and not files)\"\n   - \"recipient\" (string): always in lowercase\n   - \"action\" (string):\n       • \"reminder\" → for reminders\n       • \"send_file\" → when a file is included or when the user's message implies sending a file\n       • \"photo\" → when the message refers to sending or sharing a picture\n   - Optionally \"message\" (string)\n   - Optionally \"file\" (string): a filename or URL, if applicable\n4. If a file is attached (`fileIncluded` = true OR `contentLength` > 0), set the action to \"send_file\".\n5. If the user's message includes the word \"send\", assume it refers to sending a file or photo, unless context says otherwise.\n6. Do not produce duplicate tasks.\n7. Output must be valid JSON only — no markdown, no explanations.\n\nUser input:\n{{ $('Webhook').item.json.body.text }}\n\nFile info:\n- fileIncluded: {{ !!$binary.file || !!$json.fileIncluded }}\n- contentLength: {{ $json.headers['content-length'] || 0 }}\n\nExample output:\n[\n  { \"recipient\": \"arjun\", \"action\": \"reminder\", \"message\": \"pay money\", \"delivery_method\": \"telegram\" },\n  { \"recipient\": \"ria\", \"action\": \"send_file\", \"file\": \"invoice.pdf\", \"delivery_method\": \"gmail\" },\n  { \"recipient\": \"bhavs\", \"action\": \"photo\", \"file\": \"https://example.com/image.jpg\", \"delivery_method\": \"telegram\" }\n]\n",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        48,
+        672
+      ],
+      "id": "a5f000f8-517c-4ebf-9ab6-12a038ede33d",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        128,
+        896
+      ],
+      "id": "7756d26e-c41b-4d7f-ae6d-aaca8c5c486f",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "u68wjbHgtSfq6IUQ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "=contact:{{ $json.recipient }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        848,
+        672
+      ],
+      "id": "56487e35-a902-47d0-b45d-c5f72c5b3275",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "3LVnT8rFukoY3ld6",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the raw text from the LLM output\nlet raw = $input.first().json.text;\n\n// Remove the ```json and ``` wrapping\nraw = raw.replace(/```json\\s*|\\s*```/g, '');\n\n// Parse the string into actual JSON\nlet tasks = JSON.parse(raw);\n\n// Return each task as a separate n8n item\nreturn tasks.map(task => ({ json: task }));\nconst unique = Array.from(new Map(tasks.map(t => [JSON.stringify(t), t])).values());\nreturn unique.map(task => ({ json: task }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        672
+      ],
+      "id": "c76396bc-dca0-461d-a5b7-621cdb168bac",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "recipient, action, message",
+        "include": "=noOtherFields",
+        "options": {
+          "includeBinary": true
+        }
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        624,
+        672
+      ],
+      "id": "873eab8f-1780-40f6-9c5c-cad0ce7dd8c3",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n    // Parse contact info from Redis\n    const contact = JSON.parse(item.json.propertyName);\n\n    // Merge with task info already present in this item\n    return {\n        json: {\n            telegram: contact.telegram,\n            email: contact.email,\n            recipient: item.json.recipient,\n            action: item.json.action,\n            message: item.json.message\n        }\n    };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        672
+      ],
+      "id": "b75ebdaa-9fa6-47ef-b2af-efd41c445850",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Split Out').item.json.action }}",
+                    "rightValue": "reminder",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "17f92142-5c6d-4b21-af85-64b0df9797f8"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Reminders"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7347d8d0-50b4-4f4b-8067-2d86b59394af",
+                    "leftValue": "={{ $('Split Out').item.json.action }}",
+                    "rightValue": "send_file",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Files"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8c71871a-ceae-4aef-8118-544ab06f3fce",
+                    "leftValue": "={{ $('Split Out').item.json.action }}",
+                    "rightValue": "photos",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "photos"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1872,
+        368
+      ],
+      "id": "3e380193-f540-487c-b3de-3506a23660ad",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a friendly assistant. Take the following message and rewrite it in a casual, human tone using words like \"bro\", \"yo\", \"hey\", etc.,dont overuse the words and keep all the messages individual to each recipient- dont mention each others tasks making it feel friendly but clear.\n\nOriginal message: {{ $('Webhook').item.json.body.text }}\n\nRecipient: {{ $('Split Out').item.json.recipient }}\n\nReturn only the rewritten message as plain text.\n",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1520,
+        272
+      ],
+      "id": "750ddeb0-e933-48ca-a86f-ac85e5101131",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        496
+      ],
+      "id": "5fd6f4ad-f235-497b-b03d-7f05f1ed1d23",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "u68wjbHgtSfq6IUQ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "8359554295",
+        "file": "={{ $('Telegram Trigger').item.json.message.photo[2].file_id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2096,
+        576
+      ],
+      "id": "df26443f-9d0d-474f-9e90-b2335c4fdb04",
+      "name": "Send a photo message",
+      "webhookId": "33e7ecf0-0ea7-4b23-aeee-7fbff10d9973",
+      "credentials": {
+        "telegramApi": {
+          "id": "hfgVTOqhOJNak486",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "=8359554295",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $('Basic LLM Chain1').item.json.text }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2320,
+        368
+      ],
+      "id": "7f6a2803-8e9f-4b2c-9c2f-54ce68f4863a",
+      "name": "Send a document",
+      "webhookId": "3b0a071d-0e8a-4dd6-8424-7fab6b80f20e",
+      "credentials": {
+        "telegramApi": {
+          "id": "hfgVTOqhOJNak486",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3383e583-ec9b-4d44-a0ba-46ca11472855",
+              "leftValue": "={{ $('Code in JavaScript').item.json.delivery_method }}",
+              "rightValue": "telegram",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1296,
+        672
+      ],
+      "id": "30b76085-edbe-487d-90d3-b9878a4376b2",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a friendly assistant. Take the following message and rewrite it in a casual, human tone using words like \"bro\", \"yo\", \"hey\", etc.,dont overuse the words and keep all the messages individual to each recipient- dont mention each others tasks making it feel friendly but clear.\n- Use natural slang sparingly: Drop in \"yo\", \"bro\", or \"hey\" only once per message, and not in every message.\n- Lean into chill phrasing: Use relaxed expressions like:\n- “Looks like you’ve got this”\n- “Heads up”\n- “Just a quick nudge”\n- “All set on your end?”\n- Avoid forced hype: Skip phrases like “Let’s gooo” or “You got this brooo” unless the context is celebratory.\n- Keep it recipient-specific: Make each message feel like it’s written for one person — no group vibes.\n- Use contractions and casual grammar: “You’re good to go” instead of “You are ready to proceed.”\n- Add light personality: A touch of humor or playfulness goes a long way.\n\n\nOriginal message: \nor {{ $('Webhook').item.json.body.text }}\n\nRecipient: {{ $('Split Out').item.json.recipient }}\n\nReturn only the rewritten message as plain text.\n",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1520,
+        864
+      ],
+      "id": "cfa5fe84-182f-49c6-8c98-734a36923f07",
+      "name": "Basic LLM Chain2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        1088
+      ],
+      "id": "06f338d9-67de-4877-89e2-64e4cba8b9fd",
+      "name": "Google Gemini Chat Model2",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "u68wjbHgtSfq6IUQ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3383e583-ec9b-4d44-a0ba-46ca11472855",
+              "leftValue": "={{ $('Split Out').item.json.action }}",
+              "rightValue": "send_file",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1872,
+        864
+      ],
+      "id": "b3a6519e-caa3-4f24-8016-4920b208b347",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Code in JavaScript1').item.json.email }}",
+        "subject": "=Looks like you have a task",
+        "emailType": "text",
+        "message": "=\n{{ $('Basic LLM Chain2').item.json.text }}\n",
+        "options": {
+          "appendAttribution": false,
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {}
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2544,
+        768
+      ],
+      "id": "0703b392-4904-4806-bf04-40fcae829177",
+      "name": "Send a message1",
+      "webhookId": "08078fc8-d268-4731-bfe6-a407b12ed5ec",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "hZZRVKtFq8gx0Kqn",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "httpMethod": [
+          "POST"
+        ],
+        "path": "48edbac2-e4ac-4135-93dc-755c1b971308",
+        "options": {
+          "binaryPropertyName": "file"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -400,
+        672
+      ],
+      "id": "0601c0cb-594f-452a-9fe2-1cf683ef6c81",
+      "name": "Webhook",
+      "webhookId": "48edbac2-e4ac-4135-93dc-755c1b971308"
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "binaryPropertyName": "file0",
+        "options": {
+          "keepSource": "both"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        672
+      ],
+      "id": "fdf6cdd4-e8ad-4871-a019-aea3ea716975",
+      "name": "Extract from File",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Code in JavaScript1').item.json.email }}",
+        "subject": "=Looks like you have a task",
+        "emailType": "text",
+        "message": "={{ $('Basic LLM Chain2').item.json.text }}\n\n\n",
+        "options": {
+          "appendAttribution": false,
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {}
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2096,
+        960
+      ],
+      "id": "43a35bdb-cc8d-43d6-9d48-9bfbf4ace4f3",
+      "name": "Send a message",
+      "webhookId": "08078fc8-d268-4731-bfe6-a407b12ed5ec",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "hZZRVKtFq8gx0Kqn",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nreturn [\n  {\n    binary: {\n      data: {\n        data: Buffer.from($('Extract from File').first().json.data, 'base64'),\n        mimeType: 'application/pdf',\n        fileName: 'xnh7.pdf'\n      }\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        368
+      ],
+      "id": "25abaeae-b815-47eb-b118-50cf4ce70515",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Code in JavaScript1').item.json.telegram }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2096,
+        176
+      ],
+      "id": "93a451f6-9ae6-4fd9-9731-e6949dcb7bfa",
+      "name": "Send a text message",
+      "webhookId": "4add5d96-973e-4d68-9e8e-99956d25033a",
+      "credentials": {
+        "telegramApi": {
+          "id": "hfgVTOqhOJNak486",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        2096,
+        768
+      ],
+      "id": "7f311ecd-aa3d-4e81-a536-2f444d3f5842",
+      "name": "Split Out2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the array from 'Code in JavaScript1' node\n// const telegramItems = $items(\"Code in JavaScript1\").map(item => item.json.telegram);\nconst telegramItems = $items(\"If1\").map(item => item.json.text).flat();\n\n// Handle case where telegram is a single object or string\nif (!Array.isArray(telegramItems)) {\n  telegramItems = [telegramItems];\n}\n\n// Get your file\nconst fileData = $('Extract from File').first().json.data;\nconst mimeType = 'application/pdf';\nconst fileName = 'xnh7.pdf';\n\nconst result = [];\n\nfor (let i = 0; i < telegramItems.length; i++) {\n  const current = telegramItems[i];\n\n  // ensure current is an object\n  const jsonData = (typeof current === 'object' && current !== null)\n    ? current\n    : { value: current };\n\n  result.push({\n    json: jsonData,\n    binary: {\n      data: {\n        data: Buffer.from(fileData, 'base64'),\n        mimeType,\n        fileName\n      }\n    }\n  });\n}\n\nreturn result;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        768
+      ],
+      "id": "43d081b9-9b72-4c95-996c-54aedbfce36d",
+      "name": "Code in JavaScript5"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a photo message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain2": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Split Out2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Send a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        []
+      ]
+    },
+    "Send a message1": {
+      "main": [
+        []
+      ]
+    },
+    "Split Out2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6abfb1b2-95d6-4834-af05-b8d23e9692c3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dfb10cdcf42afa36dbe8ef936358d5359acce462cbd30d490b76224d039e9ae4"
+  },
+  "id": "PGu9YcagaMmHefOn",
+  "tags": []
+}

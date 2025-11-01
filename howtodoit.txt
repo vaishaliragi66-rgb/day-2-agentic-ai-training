@@ -1,0 +1,6 @@
+get all pics related to it
+export the json
+if possible record the workflow as mp3
+create a readme in the end
+
+png,json,mp4.
